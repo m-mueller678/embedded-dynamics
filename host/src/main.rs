@@ -1,37 +1,30 @@
-//! # Pico USB Serial Example
-//!
-//! Creates a USB Serial device on a Pico board, with the USB driver running in
-//! the main thread.
-//!
-//! This will create a USB Serial device echoing anything it receives. Incoming
-//! ASCII characters are converted to upercase, so you can tell it is working
-//! and not just local-echo!
-//!
-//! See the `Cargo.toml` file for Copyright and license details.
-
 #![no_std]
 #![no_main]
 
-// The macro for our start-up function
-use rp_pico::entry;
-
-// Ensure we halt the program on panic (if we don't mention this crate it won't
-// be linked)
-use panic_halt as _;
-
-// A shorter alias for the Peripheral Access Crate, which provides low-level
-// register access
-use rp_pico::hal::pac;
-
-// A shorter alias for the Hardware Abstraction Layer, which provides
-// higher-level drivers.
+use core::fmt::Write;
+use cortex_m::asm::delay;
+use cortex_m::delay::Delay;
+use embedded_hal::timer::CountDown;
 use rp_pico::hal;
+use hal::{
+    pac,
+    Sio,
+};
+use crate::hal::Timer;
 
-// USB Device support
-use usb_device::{class_prelude::*, prelude::*};
+use crate::pac::{RESETS, USBCTRL_DPRAM, USBCTRL_REGS};
+use crate::usb::WriteUsb;
+use fugit::ExtU32;
 
-// USB Communications Class Device support
-use usbd_serial::SerialPort;
+mod usb;
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    write!(WriteUsb,"{}\n",info).ok();
+    hal::rom_data::reset_to_usb_boot(0,0);
+    loop {}
+}
+
 
 /// Entry point to our bare-metal application.
 ///
@@ -40,93 +33,63 @@ use usbd_serial::SerialPort;
 ///
 /// The function configures the RP2040 peripherals, then echoes any characters
 /// received over USB Serial.
-#[entry]
+#[rp_pico::entry]
 fn main() -> ! {
+
     // Grab our singleton objects
-    let mut pac = pac::Peripherals::take().unwrap();
+    let pac = pac::Peripherals::take().unwrap();
+
+    let _sio = Sio::new(pac.SIO);
+   // let pins = Pins::new(pac.IO_BANK0,pac.PADS_BANK0,sio.gpio_bank0, &mut pac.RESETS);
+   // pins.led.into_push_pull_output().set_high().unwrap();
 
     // Set up the watchdog driver - needed by the clock setup code
     let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
 
+    let mut resets = pac.RESETS;
     // Configure the clocks
     //
     // The default is to generate a 125 MHz system clock
+
     let clocks = hal::clocks::init_clocks_and_plls(
         rp_pico::XOSC_CRYSTAL_FREQ,
         pac.XOSC,
         pac.CLOCKS,
         pac.PLL_SYS,
         pac.PLL_USB,
-        &mut pac.RESETS,
+        &mut resets,
         &mut watchdog,
     )
     .ok()
     .unwrap();
 
-    #[cfg(feature = "rp2040-e5")]
-    {
-        let sio = hal::Sio::new(pac.SIO);
-        let _pins = rp_pico::Pins::new(
-            pac.IO_BANK0,
-            pac.PADS_BANK0,
-            sio.gpio_bank0,
-            &mut pac.RESETS,
-        );
-    }
-
+    let usb_clock = clocks.usb_clock;
+    let usbctrl_dpram = pac.USBCTRL_DPRAM;
+    let usbctrl_regs = pac.USBCTRL_REGS;
     // Set up the USB driver
-    let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
-        pac.USBCTRL_REGS,
-        pac.USBCTRL_DPRAM,
-        clocks.usb_clock,
-        true,
-        &mut pac.RESETS,
-    ));
-
-    // Set up the USB Communications Class Device driver
-    let mut serial = SerialPort::new(&usb_bus);
-
-    // Create a USB device with a fake VID and PID
-    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
-        .manufacturer("Fake company")
-        .product("Serial port")
-        .serial_number("TEST")
-        .device_class(2) // from: https://www.usb.org/defined-class-codes
-        .build();
-
-    let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS);
-
-    loop {
-        // Check for new data
-        if usb_dev.poll(&mut [&mut serial]) {
-            let mut buf = [0u8; 64];
-            match serial.read(&mut buf) {
-                Err(_e) => {
-                    // Do nothing
-                }
-                Ok(0) => {
-                    // Do nothing
-                }
-                Ok(count) => {
-                    // Convert to upper case
-                    buf.iter_mut().take(count).for_each(|b| {
-                        b.make_ascii_uppercase();
-                    });
-                    // Send back to the host
-                    let mut wr_ptr = &buf[..count];
-                    while !wr_ptr.is_empty() {
-                        match serial.write(wr_ptr) {
-                            Ok(len) => wr_ptr = &wr_ptr[len..],
-                            // On error, just drop unwritten data.
-                            // One possible error is Err(WouldBlock), meaning the USB
-                            // write buffer is full.
-                            Err(_) => break,
-                        };
-                    }
-                }
-            }
-        }
-    }
+    usb::init_usb(&mut resets, usb_clock, usbctrl_dpram, usbctrl_regs);
+    let timer=Timer::new(pac.TIMER,&mut resets);
+    delay_ms(&timer,2000);
+    writeln!(WriteUsb,"usb init complete!").unwrap();
+    panic!();
 }
 
-// End of file
+fn delay_ms(timer:&Timer,d:u32){
+    let mut cd = timer.count_down();
+    cd.start(d.millis());
+    nb::block!(cd.wait());
+}
+
+fn try_dyn_load()->bool{
+    let flash_start = 0x20030000;
+    let bytes= &[];//&include_bytes!("../../guest/target/thumbv6m-none-eabi/debug/host")[0x010000..][..0x10];
+
+   unsafe{
+        core::ptr::copy(bytes.as_ptr(), flash_start as *mut u8, bytes.len());
+
+        let guest_fn: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x20030001 );
+        let mut data:u8 = 0;
+        guest_fn(&mut data);
+        data==42
+    }
+}
