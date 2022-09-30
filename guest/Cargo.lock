@@ -3,11 +3,16 @@
 version = 3
 
 [[package]]
-name = "host"
+name = "guest"
 version = "0.1.0"
 dependencies = [
+ "guest-lib",
  "panic-halt",
 ]
+
+[[package]]
+name = "guest-lib"
+version = "0.1.0"
 
 [[package]]
 name = "panic-halt"

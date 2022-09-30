@@ -17,11 +17,13 @@ use crate::usb::WriteUsb;
 use fugit::ExtU32;
 
 mod usb;
+mod syscall;
+mod generated_guest;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    write!(WriteUsb,"{}\n",info).ok();
-    hal::rom_data::reset_to_usb_boot(0,0);
+    write!(WriteUsb, "{}\n", info).ok();
+    hal::rom_data::reset_to_usb_boot(0, 0);
     loop {}
 }
 
@@ -40,8 +42,6 @@ fn main() -> ! {
     let pac = pac::Peripherals::take().unwrap();
 
     let _sio = Sio::new(pac.SIO);
-   // let pins = Pins::new(pac.IO_BANK0,pac.PADS_BANK0,sio.gpio_bank0, &mut pac.RESETS);
-   // pins.led.into_push_pull_output().set_high().unwrap();
 
     // Set up the watchdog driver - needed by the clock setup code
     let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
@@ -60,36 +60,39 @@ fn main() -> ! {
         &mut resets,
         &mut watchdog,
     )
-    .ok()
-    .unwrap();
+        .ok()
+        .unwrap();
 
     let usb_clock = clocks.usb_clock;
     let usbctrl_dpram = pac.USBCTRL_DPRAM;
     let usbctrl_regs = pac.USBCTRL_REGS;
     // Set up the USB driver
     usb::init_usb(&mut resets, usb_clock, usbctrl_dpram, usbctrl_regs);
-    let timer=Timer::new(pac.TIMER,&mut resets);
-    delay_ms(&timer,2000);
-    writeln!(WriteUsb,"usb init complete!").unwrap();
+    let timer = Timer::new(pac.TIMER, &mut resets);
+    delay_ms(&timer, 3000);
+    writeln!(WriteUsb, "usb init complete!").unwrap();
+    delay_ms(&timer, 3_000);
+    try_dyn_load();
+    writeln!(WriteUsb, "dyn end").unwrap();
+    delay_ms(&timer, 60_000);
     panic!();
 }
 
-fn delay_ms(timer:&Timer,d:u32){
+fn delay_ms(timer: &Timer, d: u32) {
     let mut cd = timer.count_down();
     cd.start(d.millis());
-    nb::block!(cd.wait());
+    nb::block!(cd.wait()).unwrap();
 }
 
-fn try_dyn_load()->bool{
-    let flash_start = 0x20030000;
-    let bytes= &[];//&include_bytes!("../../guest/target/thumbv6m-none-eabi/debug/host")[0x010000..][..0x10];
+fn try_dyn_load() -> bool {
+    unsafe {
+        for ph in generated_guest::PROGRAMM_HEADERS {
+            core::ptr::copy(ph.1.as_ptr(), ph.0 as *mut u8, ph.1.len());
+        }
 
-   unsafe{
-        core::ptr::copy(bytes.as_ptr(), flash_start as *mut u8, bytes.len());
-
-        let guest_fn: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x20030001 );
-        let mut data:u8 = 0;
+        let guest_fn: unsafe extern "C" fn(*mut u8) = core::mem::transmute(generated_guest::ENTRY_POINT);
+        let mut data: u8 = 0;
         guest_fn(&mut data);
-        data==42
+        data == 42
     }
 }
