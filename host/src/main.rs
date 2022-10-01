@@ -71,10 +71,8 @@ fn main() -> ! {
     let timer = Timer::new(pac.TIMER, &mut resets);
     delay_ms(&timer, 3000);
     writeln!(WriteUsb, "usb init complete!").unwrap();
-    delay_ms(&timer, 3_000);
     try_dyn_load();
     writeln!(WriteUsb, "dyn end").unwrap();
-    delay_ms(&timer, 60_000);
     panic!();
 }
 
@@ -93,6 +91,7 @@ fn try_dyn_load() -> bool {
         let guest_fn: unsafe extern "C" fn(*mut u8) = core::mem::transmute(generated_guest::ENTRY_POINT);
         let mut data: u8 = 0;
         guest_fn(&mut data);
-        data == 42
+
+        unimplemented!();
     }
 }

@@ -161,6 +161,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "guest-lib"
+version = "0.1.0"
+
+[[package]]
 name = "host"
 version = "0.1.0"
 dependencies = [
@@ -169,6 +173,7 @@ dependencies = [
  "embedded-hal",
  "fugit",
  "goblin",
+ "guest-lib",
  "nb 1.0.0",
  "rp-pico",
  "usb-device",

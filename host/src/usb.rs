@@ -49,22 +49,25 @@ pub fn init_usb(mut resets: &mut RESETS, usb_clock: UsbClock, usbctrl_dpram: USB
     };
 }
 
+pub fn write_usb(mut data:&[u8])-> core::fmt::Result{
+    assert_single_core();
+    while data.len() > 0 {
+        critical_section(|_cs| {
+            let written =unsafe{
+                USB_SERIAL.as_mut().unwrap().write(data).map_err(|_| core::fmt::Error)?
+            };
+            data = &data[written..];
+            Ok(())
+        })?;
+    }
+    Ok(())
+}
+
 pub struct WriteUsb;
 
 impl core::fmt::Write for WriteUsb {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        assert_single_core();
-        let mut data = s.as_bytes();
-        while data.len() > 0 {
-            critical_section(|_cs| {
-                let written =unsafe{
-                    USB_SERIAL.as_mut().unwrap().write(data).map_err(|_| core::fmt::Error)?
-                };
-                data = &data[written..];
-                Ok(())
-            })?;
-        }
-        Ok(())
+        write_usb(s.as_bytes())
     }
 }
 
