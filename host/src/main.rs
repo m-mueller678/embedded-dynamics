@@ -2,8 +2,8 @@
 #![no_main]
 
 use core::fmt::Write;
-use cortex_m::asm::delay;
-use cortex_m::delay::Delay;
+use cortex_m::register::control::{Control, Npriv, Spsel};
+use cortex_m::register::{control, psp};
 use embedded_hal::timer::CountDown;
 use rp_pico::hal;
 use hal::{
@@ -15,6 +15,8 @@ use crate::hal::Timer;
 use crate::pac::{RESETS, USBCTRL_DPRAM, USBCTRL_REGS};
 use crate::usb::WriteUsb;
 use fugit::ExtU32;
+use guest_lib::memory_space::GUEST_INITIAL_STACK_POINTER;
+use crate::generated_guest::ENTRY_POINT;
 
 mod usb;
 mod syscall;
@@ -27,7 +29,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-
 /// Entry point to our bare-metal application.
 ///
 /// The `#[entry]` macro ensures the Cortex-M start-up code calls this function
@@ -37,7 +38,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 /// received over USB Serial.
 #[rp_pico::entry]
 fn main() -> ! {
-
     // Grab our singleton objects
     let pac = pac::Peripherals::take().unwrap();
 
@@ -82,16 +82,22 @@ fn delay_ms(timer: &Timer, d: u32) {
     nb::block!(cd.wait()).unwrap();
 }
 
-fn try_dyn_load() -> bool {
+fn try_dyn_load() {
     unsafe {
         for ph in generated_guest::PROGRAMM_HEADERS {
+            writeln!(WriteUsb,"{:x}, {:x}, {:x}",ph.0,ph.1.len(),ph.0+ph.1.len() as u32).unwrap();
+            writeln!(WriteUsb,"guest: {:x?}",guest_lib::memory_space::GUEST_RAM_RANGE).unwrap();
+            guest_lib::memory_space::assert_range_in_guest_range(ph.0,1,ph.1.len()).unwrap();
             core::ptr::copy(ph.1.as_ptr(), ph.0 as *mut u8, ph.1.len());
         }
-
-        let guest_fn: unsafe extern "C" fn(*mut u8) = core::mem::transmute(generated_guest::ENTRY_POINT);
-        let mut data: u8 = 0;
-        guest_fn(&mut data);
-
-        unimplemented!();
+        psp::write(GUEST_INITIAL_STACK_POINTER);
+        cortex_m::interrupt::free(|_|{
+            let mut control_register = control::read();
+            control_register.set_spsel(Spsel::Psp);
+            control_register.set_npriv(Npriv::Unprivileged);
+            control::write(control_register);
+        });
+        core::mem::transmute::<u32,extern "C" fn() -> !>(ENTRY_POINT)();
+        loop{}
     }
 }

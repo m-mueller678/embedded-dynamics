@@ -1,8 +1,5 @@
 extern crate core;
 
-use goblin::{error, Object};
-use std::path::Path;
-use std::env;
 use std::fs;
 use std::fs::File;
 use goblin::elf::program_header::PT_LOAD;

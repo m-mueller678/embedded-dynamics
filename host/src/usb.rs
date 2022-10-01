@@ -1,5 +1,4 @@
 use cortex_m::interrupt::free as critical_section;
-use rp_pico::hal::usb::UsbBus;
 use usb_device::bus::UsbBusAllocator;
 use usbd_serial::SerialPort;
 use usb_device::device::{UsbDevice, UsbDeviceBuilder, UsbVidPid};
@@ -74,11 +73,6 @@ impl core::fmt::Write for WriteUsb {
 #[allow(non_snake_case)]
 #[interrupt]
 unsafe fn USBCTRL_IRQ() {
-    use core::sync::atomic::{AtomicBool, Ordering};
-
-    /// Note whether we've already printed the "hello" message.
-    static SAID_HELLO: AtomicBool = AtomicBool::new(false);
-
     critical_section(|_|{
         let usb_dev = USB_DEVICE.as_mut().unwrap();
         let serial = USB_SERIAL.as_mut().unwrap();

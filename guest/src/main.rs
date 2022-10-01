@@ -17,8 +17,9 @@
 use panic_halt as _;
 
 #[export_name = "main"]
-pub unsafe extern "C" fn __cortex_m_rt_main_trampoline() {
-    guest_lib::sys::write(b"hello, world 1!\n").unwrap();
-    guest_lib::sys::write(b"hello, world 2!\n").unwrap();
-    guest_lib::sys::write(b"hello, world 3!\n").unwrap();
+pub unsafe extern "C" fn __cortex_m_rt_main_trampoline() -> ! {
+    guest_lib::sys::call(0xABCDABCD,0xDEEDAAAA);
+    //guest_lib::sys::write(b"hello, world 1!\n").unwrap();
+    //guest_lib::sys::write(b"hello, world 2!\n").unwrap();
+    //guest_lib::sys::write(b"hello, world 3!\n").unwrap();
 }
